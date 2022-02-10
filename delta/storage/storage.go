@@ -32,6 +32,15 @@ const (
 	SchemaGCP   = "gs"
 )
 
+var (
+	backendTypes = map[string]BackendType{
+		SchemaFile:  BackendFileType,
+		SchemaS3:    BackendS3Type,
+		SchemaAzure: BackendAzureType,
+		SchemaGCP:   BackendGCPType,
+	}
+)
+
 type options struct {
 	URI string
 }
@@ -83,5 +92,4 @@ func parseBackend(uri string) (path string, t BackendType, err error) {
 	default:
 		return "", BackendUnknownType, UnknownBackendError
 	}
-
 }

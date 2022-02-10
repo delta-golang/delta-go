@@ -18,7 +18,6 @@ type Table struct {
 	Version          int64
 	VersionTimestamp int64
 	URI              string
-	BackendType      storage.BackendType
 	State            TableState
 	lastCheckPoint   Checkpoint
 }
@@ -57,6 +56,21 @@ type Checkpoint struct {
 	Parts   uint32 //10 digit decimals
 }
 
+func NewTable(uri string) *Table {
+
+	s := storage.New(uri)
+	if s == nil {
+		return nil
+	}
+
+	t := Table{
+		Storage: s,
+		URI:     uri,
+	}
+
+	return &t
+}
+
 func (t *Table) getLastCheckpoint() (Checkpoint, error) {
 	path := filepath.Join(LogDir, LastCheckPointFile)
 	data, err := t.Storage.GetObject(path)
@@ -71,6 +85,21 @@ func (t *Table) getLastCheckpoint() (Checkpoint, error) {
 	}
 
 	return cp, nil
+}
+
+func (t *Table) restoreCheckpoint() error {
+
+	cp := Checkpoint{}
+	if t.lastCheckPoint == cp {
+		// no checkpoint
+		return nil
+	}
+
+	return nil
+}
+
+func (t *Table) updateIncrements() error {
+	return nil
 }
 
 func (t *Table) logURI() string {

@@ -1,8 +1,6 @@
 package file
 
 import (
-	"io"
-	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -31,8 +29,8 @@ func New(uri string) *Store {
 func (s *Store) GetObject(relativePath string) ([]byte, error) {
 
 	p := filepath.Join(s.path, relativePath)
-	data, err := ioutil.ReadFile(p)
-	if err != nil && err != io.EOF {
+	data, err := os.ReadFile(p)
+	if err != nil {
 		return nil, err
 	}
 	return data, nil
