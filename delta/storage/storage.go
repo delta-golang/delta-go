@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bufio"
 	"errors"
 	"github.com/delta-golang/delta-go/delta/storage/file"
 	"github.com/delta-golang/delta-go/delta/storage/s3"
@@ -8,7 +9,7 @@ import (
 )
 
 type Backend interface {
-	GetObject(uri string) ([]byte, error)
+	GetObject(uri string) (*bufio.Scanner, func() error, error)
 }
 
 var (

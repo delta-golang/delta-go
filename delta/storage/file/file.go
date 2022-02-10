@@ -1,6 +1,7 @@
 package file
 
 import (
+	"bufio"
 	"log"
 	"os"
 	"path/filepath"
@@ -26,12 +27,18 @@ func New(uri string) *Store {
 	return &s
 }
 
-func (s *Store) GetObject(relativePath string) ([]byte, error) {
+func (s *Store) GetObject(relativePath string) (*bufio.Scanner, func() error, error) {
 
 	p := filepath.Join(s.path, relativePath)
-	data, err := os.ReadFile(p)
+	file, err := os.Open(p)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return data, nil
+
+	c := func() error {
+		return file.Close()
+	}
+
+	scanner := bufio.NewScanner(file)
+	return scanner, c, nil
 }

@@ -2,8 +2,11 @@ package delta
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/delta-golang/delta-go/delta/storage"
 	"github.com/google/uuid"
+	"log"
+	"os"
 	"path/filepath"
 )
 
@@ -66,6 +69,7 @@ func NewTable(uri string) *Table {
 	t := Table{
 		Storage: s,
 		URI:     uri,
+		Version: -1,
 	}
 
 	return &t
@@ -73,13 +77,20 @@ func NewTable(uri string) *Table {
 
 func (t *Table) getLastCheckpoint() (Checkpoint, error) {
 	path := filepath.Join(LogDir, LastCheckPointFile)
-	data, err := t.Storage.GetObject(path)
+	scanner, close, err := t.Storage.GetObject(path)
+
 	if err != nil {
 		return Checkpoint{}, err
 	}
 
+	defer close()
+
+	if ok := scanner.Scan(); !ok {
+		return Checkpoint{}, os.ErrNotExist
+	}
+
 	var cp Checkpoint
-	err = json.Unmarshal(data, &cp)
+	err = json.Unmarshal(scanner.Bytes(), &cp)
 	if err != nil {
 		return Checkpoint{}, err
 	}
@@ -99,7 +110,22 @@ func (t *Table) restoreCheckpoint() error {
 }
 
 func (t *Table) updateIncrements() error {
+	scanner, close, err := t.Storage.GetObject(t.commitPathForVersion(0))
+	defer close()
+
+	if err != nil {
+		return err
+	}
+
+	for scanner.Scan() {
+		log.Println(scanner.Text())
+	}
 	return nil
+}
+
+func (t *Table) commitPathForVersion(version int) string {
+	s := fmt.Sprintf("%020d.json", version)
+	return filepath.Join(LogDir, s)
 }
 
 func (t *Table) logURI() string {
