@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/delta-golang/delta-go/delta/storage"
+	"github.com/delta-golang/delta-go/delta/utils/slices"
 	"os"
 	"path/filepath"
 )
@@ -103,6 +104,7 @@ func (t *Table) updateIncrements() error {
 	}
 	defer c()
 
+	newState := TableState{}
 	for scanner.Scan() {
 		var ac map[string]json.RawMessage
 		err = json.Unmarshal(scanner.Bytes(), &ac)
@@ -117,38 +119,62 @@ func (t *Table) updateIncrements() error {
 				if err != nil {
 					return err
 				}
-				t.State.Files = append(t.State.Files, add)
+				newState.Files = append(t.State.Files, add)
 			case "remove":
 				rm, err := deserializeAction[RemoveAction](v)
 				if err != nil {
 					return err
 				}
-				t.State.Tombstones[rm.Path] = rm
+				newState.Tombstones[rm.Path] = rm
 			case "metaData":
 				md, err := deserializeAction[Metadata](v)
 				if err != nil {
 					return err
 				}
-				t.State.CurrentMetadata = md
+				newState.CurrentMetadata = md
 			case "commitInfo":
 				ci, err := deserializeAction[CommitInfo](v)
 				if err != nil {
 					return err
 				}
-				t.State.CommitInfos = append(t.State.CommitInfos, ci)
+				newState.CommitInfos = append(t.State.CommitInfos, ci)
 			case "protocol":
 				p, err := deserializeAction[Protocol](v)
 				if err != nil {
 					return err
 				}
-				if p.MinReaderVersion > 0 {
-					t.State.MinReaderVersion = p.MinReaderVersion
-					t.State.MinWriterVersion = p.MinWriterVersion
-				}
+				newState.MinReaderVersion = p.MinReaderVersion
+				newState.MinWriterVersion = p.MinWriterVersion
 			}
 		}
 	}
+	t.mergeState(&newState)
 	return nil
+}
+
+func (t *Table) mergeState(s *TableState) {
+
+	// remove files from the table that have a tombstone in new state
+	t.State.Files = slices.Filter(t.State.Files, func(f AddAction) bool {
+		for _, v := range s.Tombstones {
+			if f.Path == v.Path {
+				return false
+			}
+		}
+		return true
+	})
+
+	// add all new tombstones
+	for k, v := range s.Tombstones {
+		t.State.Tombstones[k] = v
+	}
+
+	// remove from tombstones the ones that have a new file
+	for _, v := range s.Files {
+		delete(t.State.Tombstones, v.Path)
+	}
+
+	t.State.Files = append(t.State.Files, s.Files...)
 }
 
 func (t *Table) commitPathForVersion(version int) string {
