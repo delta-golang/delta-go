@@ -64,13 +64,12 @@ func NewTable(uri string) *Table {
 
 func (t *Table) getLastCheckpoint() (Checkpoint, error) {
 	path := filepath.Join(LogDir, LastCheckPointFile)
-	scanner, close, err := t.Storage.GetObject(path)
+	scanner, c, err := t.Storage.GetObject(path)
 
 	if err != nil {
 		return Checkpoint{}, err
 	}
-
-	defer close()
+	defer c()
 
 	if ok := scanner.Scan(); !ok {
 		return Checkpoint{}, os.ErrNotExist
@@ -97,12 +96,12 @@ func (t *Table) restoreCheckpoint() error {
 }
 
 func (t *Table) updateIncrements() error {
-	scanner, close, err := t.Storage.GetObject(t.commitPathForVersion(0))
-	defer close()
+	scanner, c, err := t.Storage.GetObject(t.commitPathForVersion(0))
 
 	if err != nil {
 		return err
 	}
+	defer c()
 
 	for scanner.Scan() {
 		var ac map[string]json.RawMessage
