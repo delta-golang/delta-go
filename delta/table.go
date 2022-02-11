@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/delta-golang/delta-go/delta/storage"
-	"github.com/google/uuid"
-	"log"
 	"os"
 	"path/filepath"
 )
@@ -30,27 +28,16 @@ type TableOptions struct {
 }
 
 type TableState struct {
-	tombstones               map[string]RemoveAction
-	files                    []AddAction
-	commitInfos              []map[string]interface{}
-	appTransactionVersion    map[string]int64
-	minReaderVersion         int32
-	minWriterVersion         int32
-	currentMetadata          Metadata
-	tombstoneRetentionMillis int64
-	logRetentionMillis       int64
-	enableExpiredLogCleanup  bool
-}
-
-type Metadata struct {
-	id               uuid.UUID
-	name             string
-	description      string
-	actionFormat     ActionFormat
-	schema           string
-	partitionColumns []string
-	timestamp        int64
-	config           map[string]string
+	Tombstones               map[string]RemoveAction
+	Files                    []AddAction
+	CommitInfos              []CommitInfo
+	AppTransactionVersion    map[string]int64
+	MinReaderVersion         int32
+	MinWriterVersion         int32
+	CurrentMetadata          Metadata
+	TombstoneRetentionMillis int64
+	LogRetentionMillis       int64
+	EnableExpiredLogCleanup  bool
 }
 
 type Checkpoint struct {
@@ -118,7 +105,49 @@ func (t *Table) updateIncrements() error {
 	}
 
 	for scanner.Scan() {
-		log.Println(scanner.Text())
+		var ac map[string]json.RawMessage
+		err = json.Unmarshal(scanner.Bytes(), &ac)
+		if err != nil {
+			return err
+		}
+
+		for k, v := range ac {
+			switch k {
+			case "add":
+				add, err := deserializeAction[AddAction](v)
+				if err != nil {
+					return err
+				}
+				t.State.Files = append(t.State.Files, add)
+			case "remove":
+				rm, err := deserializeAction[RemoveAction](v)
+				if err != nil {
+					return err
+				}
+				t.State.Tombstones[rm.Path] = rm
+			case "metaData":
+				md, err := deserializeAction[Metadata](v)
+				if err != nil {
+					return err
+				}
+				t.State.CurrentMetadata = md
+			case "commitInfo":
+				ci, err := deserializeAction[CommitInfo](v)
+				if err != nil {
+					return err
+				}
+				t.State.CommitInfos = append(t.State.CommitInfos, ci)
+			case "protocol":
+				p, err := deserializeAction[Protocol](v)
+				if err != nil {
+					return err
+				}
+				if p.MinReaderVersion > 0 {
+					t.State.MinReaderVersion = p.MinReaderVersion
+					t.State.MinWriterVersion = p.MinWriterVersion
+				}
+			}
+		}
 	}
 	return nil
 }
