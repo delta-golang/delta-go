@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/delta-golang/delta-go/delta/storage"
+	viewer "github.com/delta-golang/delta-go/delta/utils/parquet"
 	"github.com/delta-golang/delta-go/delta/utils/slices"
 	"os"
 	"path/filepath"
@@ -93,11 +94,17 @@ func (t *Table) restoreCheckpoint() error {
 		return nil
 	}
 
+	paths := checkpointPathsForCheckpoint(t.lastCheckPoint)
+
+	for _, v := range paths {
+		p := filepath.Join(t.URI, v)
+		viewer.View(p)
+	}
 	return nil
 }
 
 func (t *Table) updateIncrements() error {
-	scanner, c, err := t.Storage.GetObject(t.commitPathForVersion(0))
+	scanner, c, err := t.Storage.GetObject(commitPathForVersion(0))
 
 	if err != nil {
 		return err
@@ -177,9 +184,24 @@ func (t *Table) mergeState(s *TableState) {
 	t.State.Files = append(t.State.Files, s.Files...)
 }
 
-func (t *Table) commitPathForVersion(version int) string {
+func commitPathForVersion(version int) string {
 	s := fmt.Sprintf("%020d.json", version)
 	return filepath.Join(LogDir, s)
+}
+
+func checkpointPathsForCheckpoint(cp Checkpoint) []string {
+	s := fmt.Sprintf("%020d", cp.Version)
+	prefix := filepath.Join(LogDir, s)
+	var paths []string
+	if cp.Parts == 0 {
+		paths = []string{prefix + ".checkpoint.parquet"}
+	} else {
+		for i := 0; i < int(cp.Parts); i++ {
+			paths = append(paths, fmt.Sprintf("%s.checkpoint.%010d.%010d.parquet", prefix, i+1, cp.Parts))
+		}
+	}
+
+	return paths
 }
 
 func (t *Table) logURI() string {
