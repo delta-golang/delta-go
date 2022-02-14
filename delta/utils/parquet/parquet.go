@@ -16,8 +16,9 @@ import (
 )
 
 const defaultBatchSize = 128
+const colWidth = 25
 
-type Dumper struct {
+type Seeker struct {
 	reader         file.ColumnChunkReader
 	batchSize      int64
 	valueOffset    int
@@ -31,7 +32,7 @@ type Dumper struct {
 	valueBuffer interface{}
 }
 
-func createDumper(reader file.ColumnChunkReader) *Dumper {
+func CreateDumper(reader file.ColumnChunkReader) *Seeker {
 	batchSize := defaultBatchSize
 
 	var valueBuffer interface{}
@@ -54,7 +55,7 @@ func createDumper(reader file.ColumnChunkReader) *Dumper {
 		valueBuffer = make([]parquet.FixedLenByteArray, batchSize)
 	}
 
-	return &Dumper{
+	return &Seeker{
 		reader:      reader,
 		batchSize:   int64(batchSize),
 		defLevels:   make([]int16, batchSize),
@@ -63,7 +64,7 @@ func createDumper(reader file.ColumnChunkReader) *Dumper {
 	}
 }
 
-func (dump *Dumper) readNextBatch() {
+func (dump *Seeker) readNextBatch() {
 	switch reader := dump.reader.(type) {
 	case *file.BooleanColumnChunkReader:
 		values := dump.valueBuffer.([]bool)
@@ -95,11 +96,11 @@ func (dump *Dumper) readNextBatch() {
 	dump.levelOffset = 0
 }
 
-func (dump *Dumper) hasNext() bool {
+func (dump *Seeker) hasNext() bool {
 	return dump.levelOffset < dump.levelsBuffered || dump.reader.HasNext()
 }
 
-func (dump *Dumper) FormatValue(val interface{}, width int) string {
+func (dump *Seeker) FormatValue(val interface{}, width int) string {
 	fmtstring := fmt.Sprintf("-%d", width)
 	switch val := val.(type) {
 	case nil:
@@ -136,7 +137,7 @@ func (dump *Dumper) FormatValue(val interface{}, width int) string {
 	}
 }
 
-func (dump *Dumper) Next() (interface{}, bool) {
+func (dump *Seeker) Next() (interface{}, bool) {
 	if dump.levelOffset == dump.levelsBuffered {
 		if !dump.hasNext() {
 			return nil, false
@@ -169,6 +170,7 @@ func View(pFile string) error {
 	}
 
 	fileMetadata := rdr.MetaData()
+	fmt.Printf("%+v\n", fileMetadata.Schema.Root().NumFields())
 	fmt.Println("Version:", fileMetadata.Version())
 	fmt.Println("Created By:", fileMetadata.GetCreatedBy())
 	fmt.Println("Num Rows:", rdr.NumRows())
@@ -249,12 +251,10 @@ func View(pFile string) error {
 		}
 		fmt.Println("--- Values ---")
 
-		const colwidth = 25
-
-		scanners := make([]*Dumper, fileMetadata.Schema.NumColumns())
+		scanners := make([]*Seeker, fileMetadata.Schema.NumColumns())
 		for c := 0; c < fileMetadata.Schema.NumColumns(); c++ {
-			scanners[c] = createDumper(rgr.Column(c))
-			fmt.Printf(fmt.Sprintf("%%-%ds|", colwidth), rgr.Column(c).Descriptor().Name())
+			scanners[c] = CreateDumper(rgr.Column(c))
+			fmt.Printf(fmt.Sprintf("%%-%ds|", colWidth), rgr.Column(c).Descriptor().Name())
 		}
 		fmt.Println()
 
@@ -262,10 +262,10 @@ func View(pFile string) error {
 			data := false
 			for _, s := range scanners {
 				if val, ok := s.Next(); ok {
-					fmt.Print(s.FormatValue(val, colwidth), "|")
+					fmt.Print(s.FormatValue(val, colWidth), "|")
 					data = true
 				} else {
-					fmt.Printf(fmt.Sprintf("%%-%ds|", colwidth), "")
+					fmt.Printf(fmt.Sprintf("%%-%ds|", colWidth), "")
 				}
 			}
 			fmt.Println()

@@ -3,6 +3,8 @@ package delta
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/apache/arrow/go/v8/parquet/file"
+	"github.com/apache/arrow/go/v8/parquet/schema"
 	"github.com/delta-golang/delta-go/delta/storage"
 	viewer "github.com/delta-golang/delta-go/delta/utils/parquet"
 	"github.com/delta-golang/delta-go/delta/utils/slices"
@@ -13,7 +15,15 @@ import (
 const (
 	LogDir             = "_delta_log"
 	LastCheckPointFile = "_last_checkpoint"
+	AddPath            = "add.path"
+	RemovePath         = "remove.path"
+	CDCPath            = "cdc.path"
+	MetadataPath       = "metaData.id"
+	TxnPath            = "txn.lastUpdated"
+	ProtocolPath       = "protocol.minReaderVersion"
 )
+
+var ActionPaths = []string{AddPath, RemovePath, MetadataPath, CDCPath, TxnPath, ProtocolPath}
 
 type Table struct {
 	Storage          storage.Backend
@@ -98,9 +108,67 @@ func (t *Table) restoreCheckpoint() error {
 
 	for _, v := range paths {
 		p := filepath.Join(t.URI, v)
+		rdr, err := file.OpenParquetFile(p, true)
+		if err != nil {
+			return err
+		}
+
+		seekers := make(map[index]*viewer.Seeker)
+
+		for i := 0; i < rdr.NumRowGroups(); i++ {
+			reader := rdr.RowGroup(i)
+			idx := index{
+				in: i,
+			}
+			createSeekers(rdr.MetaData().Schema, idx, reader, seekers)
+		}
+
+		rg := 0
+		for i := 0; i < int(rdr.NumRows()); i++ {
+			reader := rdr.RowGroup(rg)
+			a, ok := findActionType(reader, index{in: rg}, seekers)
+			if !ok {
+				rg++
+				continue
+			}
+			fmt.Println(a)
+		}
+
 		viewer.View(p)
 	}
 	return nil
+}
+
+type index struct {
+	in   int
+	path string
+}
+
+func createSeekers(schema *schema.Schema, idx index, reader *file.RowGroupReader, seekers map[index]*viewer.Seeker) {
+
+	for _, a := range ActionPaths {
+		i := schema.ColumnIndexByName(a)
+		r := reader.Column(i)
+		idx.path = a
+		seekers[idx] = viewer.CreateDumper(r)
+	}
+}
+
+func findActionType(reader *file.RowGroupReader, idx index, seekers map[index]*viewer.Seeker) (string, bool) {
+
+	var action string
+	for _, a := range ActionPaths {
+		idx.path = a
+		seeker := seekers[idx]
+		if v, ok := seeker.Next(); !ok {
+			return "", false
+		} else {
+			if v != nil && action == "" {
+				action = a
+			}
+		}
+	}
+	return action, true
 }
 
 func (t *Table) updateIncrements() error {
