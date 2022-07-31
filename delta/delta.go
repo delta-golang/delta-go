@@ -2,6 +2,7 @@ package delta
 
 import (
 	"errors"
+	"fmt"
 	"os"
 )
 
@@ -20,13 +21,16 @@ func LoadTable(uri string) (*Table, error) {
 	t.lastCheckPoint = cp
 	err = t.restoreCheckpoint()
 	if err != nil {
-		return nil, err
+		// we don't want to abandon if a checkpoint is corrupted for any reason
+		// we can still process the individual commits
+		fmt.Printf("error restoring checkpoint with version: %d", cp.Version)
 	}
 
-	err = t.updateIncrements()
+	state, err := t.incrementalState(t.Version + 1)
 	if err != nil {
 		return nil, err
 	}
 
+	t.mergeState(state)
 	return t, nil
 }

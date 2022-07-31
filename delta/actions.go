@@ -2,6 +2,7 @@ package delta
 
 import (
 	"encoding/json"
+
 	"github.com/google/uuid"
 	"github.com/xitongsys/parquet-go/parquet"
 )

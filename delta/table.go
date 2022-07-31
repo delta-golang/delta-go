@@ -3,13 +3,14 @@ package delta
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+
 	"github.com/apache/arrow/go/v8/parquet/file"
 	"github.com/apache/arrow/go/v8/parquet/schema"
 	"github.com/delta-golang/delta-go/delta/storage"
 	viewer "github.com/delta-golang/delta-go/delta/utils/parquet"
 	"github.com/delta-golang/delta-go/delta/utils/slices"
-	"os"
-	"path/filepath"
 )
 
 const (
@@ -25,38 +26,45 @@ const (
 
 var ActionPaths = []string{AddPath, RemovePath, MetadataPath, CDCPath, TxnPath, ProtocolPath}
 
-type Table struct {
-	Storage          storage.Backend
-	Options          TableOptions
-	Version          int64
-	VersionTimestamp int64
-	URI              string
-	State            TableState
-	lastCheckPoint   Checkpoint
-}
+type (
+	Table struct {
+		Storage          storage.Backend
+		Options          TableOptions
+		Version          int64
+		VersionTimestamp int64
+		URI              string
+		State            TableState
+		lastCheckPoint   Checkpoint
+	}
 
-type TableOptions struct {
-	requiresTombstones bool
-}
+	TableOptions struct {
+		requiresTombstones bool
+	}
 
-type TableState struct {
-	Tombstones               map[string]RemoveAction
-	Files                    []AddAction
-	CommitInfos              []CommitInfo
-	AppTransactionVersion    map[string]int64
-	MinReaderVersion         int32
-	MinWriterVersion         int32
-	CurrentMetadata          Metadata
-	TombstoneRetentionMillis int64
-	LogRetentionMillis       int64
-	EnableExpiredLogCleanup  bool
-}
+	TableState struct {
+		Tombstones               map[string]RemoveAction
+		Files                    []AddAction
+		CommitInfos              []CommitInfo
+		AppTransactionVersion    map[string]int64
+		MinReaderVersion         int32
+		MinWriterVersion         int32
+		CurrentMetadata          Metadata
+		TombstoneRetentionMillis int64
+		LogRetentionMillis       int64
+		EnableExpiredLogCleanup  bool
+	}
 
-type Checkpoint struct {
-	Version int64 //20 digit decimals
-	Size    int64
-	Parts   uint32 //10 digit decimals
-}
+	Checkpoint struct {
+		Version int64 //20 digit decimals
+		Size    int64
+		Parts   uint32 //10 digit decimals
+	}
+
+	index struct {
+		in   int
+		path string
+	}
+)
 
 func NewTable(uri string) *Table {
 
@@ -136,12 +144,9 @@ func (t *Table) restoreCheckpoint() error {
 
 		viewer.View(p)
 	}
-	return nil
-}
+	t.Version = cp.Version
 
-type index struct {
-	in   int
-	path string
+	return nil
 }
 
 func createSeekers(schema *schema.Schema, idx index, reader *file.RowGroupReader, seekers map[index]*viewer.Seeker) {
@@ -171,11 +176,11 @@ func findActionType(reader *file.RowGroupReader, idx index, seekers map[index]*v
 	return action, true
 }
 
-func (t *Table) updateIncrements() error {
-	scanner, c, err := t.Storage.GetObject(commitPathForVersion(0))
+func (t *Table) incrementalState(fromVersion int64) (*TableState, error) {
+	scanner, c, err := t.Storage.GetObject(commitPathForVersion(fromVersion))
 
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer c()
 
@@ -184,7 +189,7 @@ func (t *Table) updateIncrements() error {
 		var ac map[string]json.RawMessage
 		err = json.Unmarshal(scanner.Bytes(), &ac)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		for k, v := range ac {
@@ -192,39 +197,38 @@ func (t *Table) updateIncrements() error {
 			case "add":
 				add, err := deserializeAction[AddAction](v)
 				if err != nil {
-					return err
+					return nil, err
 				}
 				newState.Files = append(t.State.Files, add)
 			case "remove":
 				rm, err := deserializeAction[RemoveAction](v)
 				if err != nil {
-					return err
+					return nil, err
 				}
 				newState.Tombstones[rm.Path] = rm
 			case "metaData":
 				md, err := deserializeAction[Metadata](v)
 				if err != nil {
-					return err
+					return nil, err
 				}
 				newState.CurrentMetadata = md
 			case "commitInfo":
 				ci, err := deserializeAction[CommitInfo](v)
 				if err != nil {
-					return err
+					return nil, err
 				}
 				newState.CommitInfos = append(t.State.CommitInfos, ci)
 			case "protocol":
 				p, err := deserializeAction[Protocol](v)
 				if err != nil {
-					return err
+					return nil, err
 				}
 				newState.MinReaderVersion = p.MinReaderVersion
 				newState.MinWriterVersion = p.MinWriterVersion
 			}
 		}
 	}
-	t.mergeState(&newState)
-	return nil
+	return &newState, nil
 }
 
 func (t *Table) mergeState(s *TableState) {
@@ -252,7 +256,7 @@ func (t *Table) mergeState(s *TableState) {
 	t.State.Files = append(t.State.Files, s.Files...)
 }
 
-func commitPathForVersion(version int) string {
+func commitPathForVersion(version int64) string {
 	s := fmt.Sprintf("%020d.json", version)
 	return filepath.Join(LogDir, s)
 }
